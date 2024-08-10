@@ -1,0 +1,251 @@
+---
+title: "Decision Tree & Random Forest"
+author: "Elizabeth Jones"
+date: "5/11/2022"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+#Import Dataset
+
+```{r}
+
+#install.packages("Rattle")
+#install.packages("Rose")
+#install.packages("randomForest")
+#install.packages("mlbench")
+#install.packages("smotefamily")
+#library(mlbench)
+#remotes::install_github("cran/DMwR")
+#library(DMwR)
+#library(smotefamily)
+#library(ROSE)
+#library(rattle)
+#library(readr)
+library(tidyverse)
+library(rpart)
+library(rpart.plot)
+library(caret)
+library(kernlab)
+library(e1071)
+library(gridExtra)
+library(randomForest)
+
+car_insurance_data <- read.csv("C:/Users/eljon/OneDrive/Desktop/IST 707/Final Project/car insurance data.csv")
+
+```
+
+#Review data and remove NA's
+
+
+```{r}
+
+#Check the number of variables for the outcome variable
+table(car_insurance_data$OUTCOME)
+
+#Check for NA's
+sum(is.na(car_insurance_data))
+
+#remove rows with NAs
+insured<-na.omit(car_insurance_data)
+
+#verify NAs are removed
+sum(is.na(insured))
+
+#Verify number of variables
+table(insured$OUTCOME)
+
+```
+
+#Add column for rank
+
+```{r}
+#Good customers = No Accidents
+#OK customers = 1 Accident
+#Bad customers = More than 1 Accident
+
+r.insured<-insured %>% mutate (RANKED = case_when(PAST_ACCIDENTS == 0 ~ "good", PAST_ACCIDENTS == 1 ~"ok", PAST_ACCIDENTS > 1 ~ "bad"))
+```
+
+##Remove columns for gender, race & id & past accidents
+
+```{r}
+
+d.insured<-r.insured[,-c(1,3,4,8)]
+
+```
+
+#Discrentize columns
+
+```{r}
+
+# DUI = 0 equals no and 1 equals yes
+# SPEEDING_VIOLATIONS = 0 equal no and 1 equals yes
+
+d.insured<-d.insured %>% mutate (DUIS = case_when(DUIS == 0 ~ "0", DUIS >= 1 ~ "1"), 
+                                 SPEEDING_VIOLATIONS = case_when(SPEEDING_VIOLATIONS == 0 ~ "0", SPEEDING_VIOLATIONS >= 1 ~ "1"))
+
+```
+
+#Factor columns for decision tree
+
+```{r}
+
+f.insured = d.insured |> mutate_if(is.character, as.factor)
+f.insured = f.insured |> mutate_if(is.numeric, as.factor)
+
+```
+
+#Split dataset into train and test set
+
+```{r}
+
+set.seed(111)
+
+trainList <-
+  createDataPartition(y=f.insured$OUTCOME,p=0.4,list=FALSE) 
+
+insured.trainSet <-f.insured[trainList,]
+insured.testSet <- f.insured[-trainList,]
+
+#Check ratio of variables
+table(insured.testSet$OUTCOME)
+table(insured.trainSet$OUTCOME)
+
+```
+#Create first decision tree model
+
+```{r}
+
+first.model<-rpart(OUTCOME ~.,data = insured.trainSet, method = 'class')
+
+printcp(first.model)
+varImp(first.model)
+
+```
+
+#Plot first decision tree model
+
+```{r}
+
+rpart.plot(first.model)
+
+```
+
+#Check model accuracy
+
+
+```{r}
+
+prediction <- predict(first.model,newdata=insured.testSet, type = "class")
+confusionMatrix(prediction,insured.testSet$OUTCOME)
+
+```
+
+#Create second decision tree model with loss matrix
+
+```{r}
+
+loss<-matrix(c(0,10,1,0),ncol=2)
+second.model<-rpart(OUTCOME ~.,data = insured.trainSet, method = 'class', parms = list(loss=loss))
+
+```
+
+#Check second model accuracy
+
+```{r}
+
+prediction2<-predict(second.model,newdata=insured.testSet, type = "class")
+confusionMatrix(prediction2,insured.testSet$OUTCOME)
+
+```
+
+#Create third decision tree model with loss matrix and balanced training set
+
+
+```{r}
+
+#balance training set
+s.insured<-DMwR::SMOTE(OUTCOME ~., insured.trainSet, perc.over = 100, perc.under = 200)
+
+#verify ratio
+prop.table(table(s.insured$OUTCOME))
+
+#update loss matrix
+loss2<-matrix(c(0,2,1,0),ncol=2)
+
+#make model
+third.model<-rpart(OUTCOME ~.,data = s.insured, method = 'class', parms = list(loss=loss2))
+
+```
+
+#Check third model accuracy
+
+```{r}
+
+prediction3<-predict(third.model,newdata=insured.testSet, type = "class")
+confusionMatrix(prediction3,insured.testSet$OUTCOME)
+
+```
+
+#Create Random Forest Model with balanced training set
+
+```{r}
+
+#tune model
+tuneRF(x = s.insured[,1:14],
+       y = s.insured$OUTCOME,
+       ntreeTry = 500,
+       mtryStart = 14,
+       trace = FALSE)
+
+#make model
+fourth.model<- randomForest(formula = OUTCOME ~., data = s.insured, mtry = 7, ntree = 500)
+
+```
+
+#Check fourth model accuracy
+
+```{r}
+
+prediction4<-predict(fourth.model,newdata=insured.testSet, type = "class")
+confusionMatrix(prediction4,insured.testSet$OUTCOME)
+
+```
+
+#Create function to give rate
+
+
+```{r}
+
+library(tidyverse)
+install.packages("modelr")
+library(modelr)
+
+
+
+final.insured<-data.frame(f.insured)
+
+
+
+final.insured$prediction<-predict(third.model,newdata=f.insured, type = "class")
+
+view(final.insured)
+f.insured[500,]
+predictOutcome[500]
+view(f.insured)
+
+final.insured$RATE <- ifelse(final.insured$prediction == 0 & final.insured$RANK == "good", "BEST RATE",ifelse(final.insured$prediction == 0 & final.insured$RANKED == "ok", "GOOD RATE",
+            ifelse(final.insured$prediction == 0 & final.insured$RANKED == "bad", "OK RATE",
+            ifelse(final.insured$prediction == 1 & final.insured$RANKED == "good", "GOOD RATE",
+            ifelse(final.insured$prediction == 1 & final.insured$RANKED == "ok", "OK RATE",
+            ifelse(final.insured$prediction == 1 & final.insured$RANKED == "bad", "BAD RATE", "BAD RATE"))))))                                                                                             
+final.insured$RATE<-ifelse(final.insured$prediction == 0 & final.insured$RANK == "good", 
+                           "BEST RATE", "GOOD RATE")                        
+
+
+```
+
+
+

@@ -1,0 +1,100 @@
+---
+title: "Insurance Rate Column"
+author: "Elizabeth Jones"
+date: "5/11/2022"
+output: html_document
+---
+
+```{r}
+
+library(tidyverse)
+library(rpart)
+library(rpart.plot)
+library(caret)
+library(kernlab)
+library(e1071)
+library(gridExtra)
+library(randomForest)
+library(smotefamily)
+library(readr)
+library(dplyr)
+
+```
+
+#CREATE MODEL
+
+```{r}
+
+#IMPORT DATA
+car_insurance_data <- read.csv("C:/Users/eljon/OneDrive/Desktop/IST 707/Final Project/car insurance data.csv")
+
+#remove rows with NAs
+insured<-na.omit(car_insurance_data)
+
+#ADD Column with customer rank
+r.insured<-insured %>% mutate (RANKED = case_when(PAST_ACCIDENTS == 0 ~ "good", PAST_ACCIDENTS == 1 ~"ok", PAST_ACCIDENTS > 1 ~ "bad"))
+
+#REMOVE uneeded columns
+d.insured<-r.insured[,-c(1,3,4,8)]
+
+#Discrentize columns
+d.insured<-d.insured %>% mutate (DUIS = case_when(DUIS == 0 ~ "0", DUIS >= 1 ~ "1"), 
+                                 SPEEDING_VIOLATIONS = case_when(SPEEDING_VIOLATIONS == 0 ~ "0", SPEEDING_VIOLATIONS >= 1 ~ "1"))
+
+#Factor Columns
+f.insured = d.insured |> mutate_if(is.character, as.factor)
+f.insured = f.insured |> mutate_if(is.numeric, as.factor)
+
+#Create train & test dataset
+set.seed(111)
+
+trainList <-
+  createDataPartition(y=f.insured$OUTCOME,p=0.4,list=FALSE) 
+
+insured.trainSet <-f.insured[trainList,]
+insured.testSet <- f.insured[-trainList,]
+
+#balance training set
+s.insured<-DMwR::SMOTE(OUTCOME ~., insured.trainSet, perc.over = 100, perc.under = 200)
+
+#create loss matrix
+loss2<-matrix(c(0,2,1,0),ncol=2)
+
+#make model
+third.model<-rpart(OUTCOME ~.,data = s.insured, method = 'class', parms = list(loss=loss2))
+
+```
+
+#ADD COLUMN TO DETERMINE PREDICTION
+
+```{r}
+
+#create new dataframe
+final.insured<-data.frame(f.insured)
+
+#add columns
+final.insured$PREDICTION<-predict(third.model,newdata=f.insured, type = "class")
+
+```
+
+#ADD COLUMN TO DETERMINE RATE
+
+```{r}
+
+
+#Make column
+final.insured$RATE <- ifelse(final.insured$PREDICTION == 0 & final.insured$RANKED == "good", "BEST RATE",ifelse(final.insured$PREDICTION == 0 & final.insured$RANKED == "ok", "GOOD RATE",
+            ifelse(final.insured$PREDICTION == 0 & final.insured$RANKED == "bad", "OK RATE",
+            ifelse(final.insured$PREDICTION == 1 & final.insured$RANKED == "good", "GOOD RATE",
+            ifelse(final.insured$PREDICTION == 1 & final.insured$RANKED == "ok", "OK RATE",
+            ifelse(final.insured$PREDICTION == 1 & final.insured$RANKED == "bad", "BAD RATE", "BAD RATE"))))))  
+```
+
+#View Dataset
+
+```{r}
+
+glimpse(final.insured)
+
+```
+
